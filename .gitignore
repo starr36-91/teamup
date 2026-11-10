@@ -1,0 +1,21 @@
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Dependencies and build output
+node_modules/
+dist/
+.env
+.env.*
+
+# Not part of the TeamUp project
+M1-赛道分析-校园轻匹配.html
