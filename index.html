@@ -1281,93 +1281,74 @@ Check your Browserslist config to be sure that your targets are set up correctly
     }
 
     async function boot() {
-      bindGlobalEvents();
-      if (!supabaseClient) {
-        showNetworkWarning();
-        showAuth({ prefill: false, notice: '云服务 SDK 加载失败，请检查网络后刷新页面。' });
-        return;
-      }
-      checkCloudConnection();
-
-      if (!window.currentUser) {
-        let saved = null;
-        let hasSavedSession = false;
-        let restoreError = false;
-        try {
-          const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-          if (raw) {
-            hasSavedSession = true;
-            try {
-              saved = JSON.parse(raw);
-            } catch (parseError) {
-              console.warn('[TeamUp] 本地登录状态格式无效', parseError);
-              saved = null;
-            }
-          }
-        } catch (storageError) {
-          console.warn('[TeamUp] 无法读取本地登录状态', storageError);
-        }
-
-        if (hasSavedSession) {
-          showGlobalLoading();
-          try {
-            if (saved && saved.studentId) {
-              const { data: savedUserRow, error: savedUserError } = await supabaseClient
-                .from('users')
-                .select('*')
-                .eq('student_id', saved.studentId)
-                .maybeSingle();
-              if (savedUserError) throw savedUserError;
-              const savedUser = normalizeUserRow(savedUserRow);
-              if (savedUser) {
-                window.currentUser = {
-                  id: savedUser.id,
-                  studentId: savedUser.studentId,
-                  name: savedUser.name,
-                  phone: savedUser.phone,
-                  major: savedUser.major,
-                  role: savedUser.role,
-                  card: savedUser.card
-                };
-                db.profile = profileFromUser(window.currentUser);
-                db.currentRole = db.profile.role;
-                state.tab = 'competitions';
-                state.competitionId = null;
-                state.teamId = null;
-                state.teamOrigin = 'competitions';
-                state.expandedAppId = null;
-                state.editingCard = false;
-                state.cardDraft = null;
-                state.cardReturn = null;
-                state.lastViewKey = '';
-                hideAuth();
-                await render();
-                return;
-              }
-            }
-            localStorage.removeItem(AUTH_STORAGE_KEY);
-          } catch (error) {
-            restoreError = true;
-            console.error('[TeamUp] 自动恢复登录失败', error);
-            showNetworkWarning();
-          } finally {
-            hideGlobalLoading();
-          }
-        }
-
-        if (!window.currentUser) {
-          showAuth({
-            prefill: false,
-            notice: restoreError ? '自动恢复登录失败，请重新登录。' : ''
-          });
+      showGlobalLoading();
+      try {
+        bindGlobalEvents();
+        if (!supabaseClient) {
+          showNetworkWarning();
+          showAuth({ prefill: false, notice: '云服务 SDK 加载失败，请检查网络后刷新页面。' });
           return;
         }
-      }
+        checkCloudConnection();
 
-      db.profile = profileFromUser(window.currentUser);
-      db.currentRole = db.profile.role;
-      hideAuth();
-      render();
+        let saved = null;
+        try {
+          const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+          if (raw) saved = JSON.parse(raw);
+        } catch (error) {
+          console.warn('[TeamUp] 无法读取本地登录状态', error);
+          try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch (storageError) { /* noop */ }
+          saved = null;
+        }
+
+        if (saved && saved.studentId) {
+          try {
+            const { data: savedUserRow, error: savedUserError } = await supabaseClient
+              .from('users')
+              .select('*')
+              .eq('student_id', saved.studentId)
+              .maybeSingle();
+            if (savedUserError) throw savedUserError;
+            const savedUser = normalizeUserRow(savedUserRow);
+            if (!savedUser) throw new Error('未找到已保存的云端用户');
+
+            window.currentUser = {
+              id: savedUser.id,
+              studentId: savedUser.studentId,
+              name: savedUser.name,
+              phone: savedUser.phone,
+              major: savedUser.major,
+              role: savedUser.role,
+              card: savedUser.card
+            };
+            db.profile = profileFromUser(window.currentUser);
+            db.currentRole = db.profile.role;
+            state.tab = 'competitions';
+            state.competitionId = null;
+            state.teamId = null;
+            state.teamOrigin = 'competitions';
+            state.expandedAppId = null;
+            state.editingCard = false;
+            state.cardDraft = null;
+            state.cardReturn = null;
+            state.lastViewKey = '';
+            hideAuth();
+            await render();
+            return;
+          } catch (error) {
+            console.error('[TeamUp] 自动恢复登录失败', error);
+            try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch (storageError) { /* noop */ }
+            window.currentUser = null;
+            showNetworkWarning();
+            showAuth({ prefill: false });
+            return;
+          }
+        }
+
+        showAuth({ prefill: false });
+      } finally {
+        hideGlobalLoading();
+      }
     }
 
     function bindGlobalEvents() {
