@@ -595,6 +595,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
     // applications(id, team_id, applicant_id, status, card_snapshot, created_at)
     const supabaseUrl = 'https://oeiclctvnjqwdufvumub.supabase.co';
     const supabaseKey = 'sb_publishable_nlQEGG4SgEDK4haNVJH9UQ_D0ZM3Rhp';
+    const AUTH_STORAGE_KEY = 'teamup_user_session';
     let supabaseClient = null;
     try {
       supabaseClient = window.supabase ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
@@ -1279,7 +1280,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
       db.currentRole = db.profile.role;
     }
 
-    function boot() {
+    async function boot() {
       bindGlobalEvents();
       if (!supabaseClient) {
         showNetworkWarning();
@@ -1287,10 +1288,82 @@ Check your Browserslist config to be sure that your targets are set up correctly
         return;
       }
       checkCloudConnection();
+
       if (!window.currentUser) {
-        showAuth({ prefill: false });
-        return;
+        let saved = null;
+        let hasSavedSession = false;
+        let restoreError = false;
+        try {
+          const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+          if (raw) {
+            hasSavedSession = true;
+            try {
+              saved = JSON.parse(raw);
+            } catch (parseError) {
+              console.warn('[TeamUp] 本地登录状态格式无效', parseError);
+              saved = null;
+            }
+          }
+        } catch (storageError) {
+          console.warn('[TeamUp] 无法读取本地登录状态', storageError);
+        }
+
+        if (hasSavedSession) {
+          showGlobalLoading();
+          try {
+            if (saved && saved.studentId) {
+              const { data: savedUserRow, error: savedUserError } = await supabaseClient
+                .from('users')
+                .select('*')
+                .eq('student_id', saved.studentId)
+                .maybeSingle();
+              if (savedUserError) throw savedUserError;
+              const savedUser = normalizeUserRow(savedUserRow);
+              if (savedUser) {
+                window.currentUser = {
+                  id: savedUser.id,
+                  studentId: savedUser.studentId,
+                  name: savedUser.name,
+                  phone: savedUser.phone,
+                  major: savedUser.major,
+                  role: savedUser.role,
+                  card: savedUser.card
+                };
+                db.profile = profileFromUser(window.currentUser);
+                db.currentRole = db.profile.role;
+                state.tab = 'competitions';
+                state.competitionId = null;
+                state.teamId = null;
+                state.teamOrigin = 'competitions';
+                state.expandedAppId = null;
+                state.editingCard = false;
+                state.cardDraft = null;
+                state.cardReturn = null;
+                state.lastViewKey = '';
+                hideAuth();
+                await render();
+                return;
+              }
+            }
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+          } catch (error) {
+            restoreError = true;
+            console.error('[TeamUp] 自动恢复登录失败', error);
+            showNetworkWarning();
+          } finally {
+            hideGlobalLoading();
+          }
+        }
+
+        if (!window.currentUser) {
+          showAuth({
+            prefill: false,
+            notice: restoreError ? '自动恢复登录失败，请重新登录。' : ''
+          });
+          return;
+        }
       }
+
       db.profile = profileFromUser(window.currentUser);
       db.currentRole = db.profile.role;
       hideAuth();
@@ -1871,6 +1944,11 @@ Check your Browserslist config to be sure that your targets are set up correctly
           role: user.role,
           card: user.card
         };
+        try {
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ studentId: user.studentId }));
+        } catch (storageError) {
+          console.warn('[TeamUp] 无法保存登录状态', storageError);
+        }
         db.profile = profileFromUser(window.currentUser);
         db.currentRole = db.profile.role;
 
@@ -1910,6 +1988,11 @@ Check your Browserslist config to be sure that your targets are set up correctly
       db.teams = [];
       db.applications = [];
       db.users = [];
+      try {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+      } catch (storageError) {
+        console.warn('[TeamUp] 无法清除登录状态', storageError);
+      }
       window.location.reload();
     }
 
@@ -4124,9 +4207,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
       }, 2400);
     }
 
-    try {
-      boot();
-    } catch (error) {
+    boot().catch(function (error) {
       console.error('[TeamUp] boot failed', error);
       const app = document.getElementById('app');
       const auth = document.getElementById('auth-screen');
@@ -4140,7 +4221,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
           button.addEventListener('click', function () { window.location.reload(); });
         }
       }
-    }
+    });
   </script>
 </body>
 </html>
